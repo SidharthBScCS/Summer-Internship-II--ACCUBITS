@@ -1,0 +1,4 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}\\TASK 1\\.venv\\Scripts\\python.exe",
+  "jupyter.jupyterServerType": "local"
+}

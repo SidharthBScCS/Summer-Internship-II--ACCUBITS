@@ -36,16 +36,8 @@ function App() {
     () => window.localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY) ?? starterChat.id
   )
   const [input, setInput] = useState('')
-  const [status, setStatus] = useState({ rag_ready: false, llm_mode: 'demo', document_count: 0 })
-  const [sources, setSources] = useState([])
   const [loading, setLoading] = useState(false)
-  const [ingesting, setIngesting] = useState(false)
-
   const activeChat = chats.find((chat) => chat.id === activeChatId) ?? chats[0]
-
-  useEffect(() => {
-    fetchStatus()
-  }, [])
 
   useEffect(() => {
     window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chats))
@@ -63,16 +55,6 @@ function App() {
     }
   }, [activeChatId, chats])
 
-  async function fetchStatus() {
-    try {
-      const response = await fetch(`${API_BASE}/status`)
-      const data = await response.json()
-      setStatus(data)
-    } catch (error) {
-      console.error('Status fetch failed', error)
-    }
-  }
-
   function handleNewChat() {
     const newChat = {
       id: crypto.randomUUID(),
@@ -87,26 +69,32 @@ function App() {
     }
     setChats((current) => [newChat, ...current])
     setActiveChatId(newChat.id)
-    setSources([])
+  }
+
+  function handleDeleteChat(chatId) {
+    setChats((current) => {
+      const remainingChats = current.filter((chat) => chat.id !== chatId)
+      if (remainingChats.length > 0) {
+        return remainingChats
+      }
+
+      const fallbackChat = {
+        id: crypto.randomUUID(),
+        title: 'New Agent Chat',
+        createdAt: new Date().toISOString(),
+        messages: [
+          {
+            role: 'assistant',
+            content: 'Fresh chat ready. Ask a question and I will use the indexed context when available.'
+          }
+        ]
+      }
+      return [fallbackChat]
+    })
   }
 
   function updateChat(chatId, updater) {
     setChats((current) => current.map((chat) => (chat.id === chatId ? updater(chat) : chat)))
-  }
-
-  async function handleIngest() {
-    setIngesting(true)
-    try {
-      const response = await fetch(`${API_BASE}/ingest`, { method: 'POST' })
-      const data = await response.json()
-      await fetchStatus()
-      window.alert(`Indexed ${data.indexed_documents} documents and ${data.indexed_chunks} chunks.`)
-    } catch (error) {
-      console.error('Ingest failed', error)
-      window.alert('Could not ingest documents. Make sure the backend is running.')
-    } finally {
-      setIngesting(false)
-    }
   }
 
   async function handleSubmit(event) {
@@ -125,8 +113,8 @@ function App() {
       messages: optimisticMessages
     }))
 
-    setInput('')
     setLoading(true)
+    setInput('')
 
     try {
       const response = await fetch(`${API_BASE}/chat`, {
@@ -140,6 +128,11 @@ function App() {
           }))
         })
       })
+
+      if (!response.ok) {
+        throw new Error(`Chat request failed with status ${response.status}`)
+      }
+
       const data = await response.json()
       const assistantMessage = { role: 'assistant', content: data.answer }
 
@@ -147,8 +140,6 @@ function App() {
         ...chat,
         messages: [...chat.messages, assistantMessage]
       }))
-      setSources(data.sources ?? [])
-      setStatus((current) => ({ ...current, llm_mode: data.mode ?? current.llm_mode }))
     } catch (error) {
       console.error('Chat failed', error)
       updateChat(activeChat.id, (chat) => ({
@@ -174,60 +165,62 @@ function App() {
             <span className="new-chat-icon">+</span>
             <span>New chat</span>
           </button>
-
-          <button className="ghost-button" onClick={handleIngest} disabled={ingesting}>
-            {ingesting ? 'Indexing...' : 'Ingest Knowledge'}
-          </button>
         </div>
 
         <div className="history">
-          <div className="sidebar-label">Chat History</div>
           <div className="history-list">
             {chats.map((chat) => (
-              <button
-                key={chat.id}
-                className={`history-item ${chat.id === activeChatId ? 'active' : ''}`}
-                onClick={() => {
-                  setActiveChatId(chat.id)
-                  setSources([])
-                }}
-              >
-                <strong>{chat.title}</strong>
-                <span>{new Date(chat.createdAt).toLocaleDateString()}</span>
-              </button>
+              <div key={chat.id} className={`history-item ${chat.id === activeChatId ? 'active' : ''}`}>
+                <button
+                  className="history-select"
+                  onClick={() => {
+                    setActiveChatId(chat.id)
+                  }}
+                >
+                  <strong>{chat.title}</strong>
+                </button>
+                <button
+                  className="history-delete"
+                  aria-label={`Delete ${chat.title}`}
+                  onClick={() => {
+                    handleDeleteChat(chat.id)
+                  }}
+                >
+                  x
+                </button>
+              </div>
             ))}
           </div>
-        </div>
-
-        <div className="sidebar-footer">
-          <span>{status.rag_ready ? 'RAG ready' : 'No index yet'}</span>
-          <span>{status.llm_mode} mode</span>
-          <span>{status.document_count} docs</span>
         </div>
       </aside>
 
-      <main className="chat-layout">
-        <header className="chat-header">
-          <div>
-            <h1>Agent Builder</h1>
-            <p>Simple LLM + RAG workspace with chat history.</p>
-          </div>
-        </header>
-
-        <section className="chat-panel">
-          <div className="messages">
-            {activeChat?.messages.map((message, index) => (
-              <article key={`${message.role}-${index}`} className={`message ${message.role}`}>
-                <span>{message.role === 'assistant' ? 'Agent' : 'You'}</span>
-                <p>{message.content}</p>
-              </article>
-            ))}
-            {loading && (
-              <article className="message assistant">
-                <span>Agent</span>
-                <p>Thinking through your request...</p>
-              </article>
-            )}
+      <main className="chat-panel">
+        <div className="chat-thread-shell">
+          <div className="messages-wrap">
+            <div className="messages">
+              {activeChat?.messages.map((message, index) => (
+                <article key={`${message.role}-${index}`} className={`message-row ${message.role}`}>
+                  <div className="message-shell">
+                    <div className="message-avatar">{message.role === 'assistant' ? 'A' : 'Y'}</div>
+                    <article className={`message ${message.role}`}>
+                      <span>{message.role === 'assistant' ? 'Agent' : 'You'}</span>
+                      <p>{message.content}</p>
+                    </article>
+                  </div>
+                </article>
+              ))}
+              {loading && (
+                <article className="message-row assistant">
+                  <div className="message-shell">
+                    <div className="message-avatar">A</div>
+                    <article className="message assistant">
+                      <span>Agent</span>
+                      <p>Thinking...</p>
+                    </article>
+                  </div>
+                </article>
+              )}
+            </div>
           </div>
 
           <div className="composer-wrap">
@@ -239,33 +232,11 @@ function App() {
                 placeholder="Message your agent..."
               />
               <button className="send-button" type="submit" disabled={loading}>
-                {loading ? 'Sending...' : 'Send'}
+                {loading ? '...' : '>'}
               </button>
             </form>
           </div>
-        </section>
-
-        <section className="sources-card">
-          <div className="sources-header">
-            <h3>Sources</h3>
-            <span>Latest retrieved context</span>
-          </div>
-          <div className="sources-list">
-            {sources.length === 0 ? (
-              <p className="empty-state">Retrieved chunks will appear here after you chat with indexed knowledge.</p>
-            ) : (
-              sources.map((source) => (
-                <article key={source.id} className="source-item">
-                  <header>
-                    <strong>{source.document}</strong>
-                    <span>{source.score.toFixed(3)}</span>
-                  </header>
-                  <p>{source.text}</p>
-                </article>
-              ))
-            )}
-          </div>
-        </section>
+        </div>
       </main>
     </div>
   )

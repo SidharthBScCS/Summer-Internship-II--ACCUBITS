@@ -1,9 +1,0 @@
-RAG stands for Retrieval-Augmented Generation.
-
-LangChain is a framework used to build AI applications.
-
-FAISS is a vector database used in RAG systems.
-
-Embeddings convert text into numerical vectors.
-
-The three stages of RAG are Retrieval, Augmentation, and Generation.

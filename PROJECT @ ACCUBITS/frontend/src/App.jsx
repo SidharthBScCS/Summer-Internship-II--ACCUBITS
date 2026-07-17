@@ -1,120 +1,62 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const API_BASE = 'http://localhost:8000/api'
-const CHAT_STORAGE_KEY = 'agent-builder-chats'
-const ACTIVE_CHAT_STORAGE_KEY = 'agent-builder-active-chat'
-
-const starterChat = {
-  id: crypto.randomUUID(),
-  title: 'New Agent Chat',
-  createdAt: new Date().toISOString(),
-  messages: [
-    {
-      role: 'assistant',
-      content:
-        'Ask about your indexed knowledge base, system design, or agent workflow. Create a new chat anytime from the sidebar.'
-    }
-  ]
-}
 
 function App() {
-  const [chats, setChats] = useState(() => {
-    const saved = window.localStorage.getItem(CHAT_STORAGE_KEY)
-    if (!saved) {
-      return [starterChat]
-    }
-
-    try {
-      const parsed = JSON.parse(saved)
-      return parsed.length > 0 ? parsed : [starterChat]
-    } catch (error) {
-      console.error('Could not restore chat history', error)
-      return [starterChat]
-    }
-  })
-  const [activeChatId, setActiveChatId] = useState(
-    () => window.localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY) ?? starterChat.id
-  )
+  const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const activeChat = chats.find((chat) => chat.id === activeChatId) ?? chats[0]
+  const [status, setStatus] = useState('Checking backend...')
+  const [connected, setConnected] = useState(false)
+  const endRef = useRef(null)
+  const textareaRef = useRef(null)
 
   useEffect(() => {
-    window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chats))
-  }, [chats])
+    checkStatus()
+  }, [])
 
   useEffect(() => {
-    if (activeChatId) {
-      window.localStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, activeChatId)
-    }
-  }, [activeChatId])
+    endRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, loading])
 
   useEffect(() => {
-    if (chats.length > 0 && !chats.some((chat) => chat.id === activeChatId)) {
-      setActiveChatId(chats[0].id)
-    }
-  }, [activeChatId, chats])
-
-  function handleNewChat() {
-    const newChat = {
-      id: crypto.randomUUID(),
-      title: 'Untitled Chat',
-      createdAt: new Date().toISOString(),
-      messages: [
-        {
-          role: 'assistant',
-          content: 'Fresh chat ready. Ask a question and I will use the indexed context when available.'
-        }
-      ]
-    }
-    setChats((current) => [newChat, ...current])
-    setActiveChatId(newChat.id)
-  }
-
-  function handleDeleteChat(chatId) {
-    setChats((current) => {
-      const remainingChats = current.filter((chat) => chat.id !== chatId)
-      if (remainingChats.length > 0) {
-        return remainingChats
-      }
-
-      const fallbackChat = {
-        id: crypto.randomUUID(),
-        title: 'New Agent Chat',
-        createdAt: new Date().toISOString(),
-        messages: [
-          {
-            role: 'assistant',
-            content: 'Fresh chat ready. Ask a question and I will use the indexed context when available.'
-          }
-        ]
-      }
-      return [fallbackChat]
-    })
-  }
-
-  function updateChat(chatId, updater) {
-    setChats((current) => current.map((chat) => (chat.id === chatId ? updater(chat) : chat)))
-  }
-
-  async function handleSubmit(event) {
-    event.preventDefault()
-    const message = input.trim()
-    if (!message || !activeChat) {
+    const textarea = textareaRef.current
+    if (!textarea) {
       return
     }
 
-    const nextUserMessage = { role: 'user', content: message }
-    const optimisticMessages = [...activeChat.messages, nextUserMessage]
+    textarea.style.height = '0px'
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`
+  }, [input])
 
-    updateChat(activeChat.id, (chat) => ({
-      ...chat,
-      title: chat.title === 'Untitled Chat' || chat.title === 'New Agent Chat' ? message.slice(0, 28) : chat.title,
-      messages: optimisticMessages
-    }))
+  async function checkStatus() {
+    try {
+      const response = await fetch(`${API_BASE}/status`)
+      if (!response.ok) {
+        throw new Error('Status request failed')
+      }
 
-    setLoading(true)
+      const data = await response.json()
+      setConnected(true)
+      setStatus(`Backend connected • ${data.llm_mode}`)
+    } catch (error) {
+      console.error('Status check failed', error)
+      setConnected(false)
+      setStatus('Backend not connected')
+    }
+  }
+
+  async function sendMessage(event) {
+    event.preventDefault()
+    const message = input.trim()
+    if (!message || loading) {
+      return
+    }
+
+    const nextMessages = [...messages, { role: 'user', content: message }]
+    setMessages(nextMessages)
     setInput('')
+    setLoading(true)
 
     try {
       const response = await fetch(`${API_BASE}/chat`, {
@@ -122,7 +64,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message,
-          history: optimisticMessages.map((entry) => ({
+          history: nextMessages.map((entry) => ({
             role: entry.role,
             content: entry.content
           }))
@@ -130,114 +72,125 @@ function App() {
       })
 
       if (!response.ok) {
-        throw new Error(`Chat request failed with status ${response.status}`)
+        throw new Error(`Chat failed with status ${response.status}`)
       }
 
       const data = await response.json()
-      const assistantMessage = { role: 'assistant', content: data.answer }
-
-      updateChat(activeChat.id, (chat) => ({
-        ...chat,
-        messages: [...chat.messages, assistantMessage]
-      }))
+      setMessages((current) => [...current, { role: 'assistant', content: data.answer }])
+      setConnected(true)
+      setStatus(`Backend connected • ${data.mode}`)
     } catch (error) {
       console.error('Chat failed', error)
-      updateChat(activeChat.id, (chat) => ({
-        ...chat,
-        messages: [
-          ...chat.messages,
-          {
-            role: 'assistant',
-            content: 'The backend is unavailable right now. Start the FastAPI server and try again.'
-          }
-        ]
-      }))
+      setMessages((current) => [
+        ...current,
+        {
+          role: 'assistant',
+          content: 'I could not reach Gemini through the backend. Check the backend, API key, and internet connection.'
+        }
+      ])
+      setConnected(false)
+      setStatus('Backend not connected')
     } finally {
       setLoading(false)
     }
   }
 
+  function handleKeyDown(event) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      void sendMessage(event)
+    }
+  }
+
   return (
     <div className="app-shell">
-      <aside className="sidebar">
-        <div className="sidebar-top">
-          <button className="new-chat-button" onClick={handleNewChat}>
-            <span className="new-chat-icon">+</span>
-            <span>New chat</span>
-          </button>
-        </div>
+      <div className="ambient ambient-one" />
+      <div className="ambient ambient-two" />
 
-        <div className="history">
-          <div className="history-list">
-            {chats.map((chat) => (
-              <div key={chat.id} className={`history-item ${chat.id === activeChatId ? 'active' : ''}`}>
-                <button
-                  className="history-select"
-                  onClick={() => {
-                    setActiveChatId(chat.id)
-                  }}
-                >
-                  <strong>{chat.title}</strong>
-                </button>
-                <button
-                  className="history-delete"
-                  aria-label={`Delete ${chat.title}`}
-                  onClick={() => {
-                    handleDeleteChat(chat.id)
-                  }}
-                >
-                  x
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      </aside>
-
-      <main className="chat-panel">
-        <div className="chat-thread-shell">
-          <div className="messages-wrap">
-            <div className="messages">
-              {activeChat?.messages.map((message, index) => (
-                <article key={`${message.role}-${index}`} className={`message-row ${message.role}`}>
-                  <div className="message-shell">
-                    <div className="message-avatar">{message.role === 'assistant' ? 'A' : 'Y'}</div>
-                    <article className={`message ${message.role}`}>
-                      <span>{message.role === 'assistant' ? 'Agent' : 'You'}</span>
-                      <p>{message.content}</p>
-                    </article>
-                  </div>
-                </article>
-              ))}
-              {loading && (
-                <article className="message-row assistant">
-                  <div className="message-shell">
-                    <div className="message-avatar">A</div>
-                    <article className="message assistant">
-                      <span>Agent</span>
-                      <p>Thinking...</p>
-                    </article>
-                  </div>
-                </article>
-              )}
+      <section className="chat-card">
+        <header className="topbar">
+          <div className="brand">
+            <div className="brand-mark" aria-hidden="true">
+              AI
+            </div>
+            <div>
+              <p className="eyebrow">Gemini Workspace</p>
+              <h1>Ask anything</h1>
             </div>
           </div>
 
-          <div className="composer-wrap">
-            <form className="composer" onSubmit={handleSubmit}>
-              <textarea
-                rows="2"
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                placeholder="Message your agent..."
-              />
-              <button className="send-button" type="submit" disabled={loading}>
-                {loading ? '...' : '>'}
-              </button>
-            </form>
+          <button
+            type="button"
+            className={`status-chip ${connected ? 'connected' : 'offline'}`}
+            onClick={checkStatus}
+          >
+            <span className="status-dot" />
+            <span>{status}</span>
+          </button>
+        </header>
+
+        <main className="thread">
+          {messages.length === 0 && (
+            <section className="empty-state">
+              <p className="eyebrow">Ready</p>
+              <h2>Start a conversation with Gemini</h2>
+              <p>
+                Your backend is connected to the chat interface here. Ask a general question, a technical question,
+                or something current and the assistant will respond in this thread.
+              </p>
+            </section>
+          )}
+
+          {messages.map((message, index) => (
+            <article key={`${message.role}-${index}`} className={`message-row ${message.role}`}>
+              <div className={`avatar ${message.role}`}>{message.role === 'assistant' ? 'AI' : 'You'}</div>
+              <div className="message-content">
+                <div className="message-role">{message.role === 'assistant' ? 'Assistant' : 'You'}</div>
+                <div className={`bubble ${message.role}`}>{message.content}</div>
+              </div>
+            </article>
+          ))}
+
+          {loading && (
+            <article className="message-row assistant">
+              <div className="avatar assistant">AI</div>
+              <div className="message-content">
+                <div className="message-role">Assistant</div>
+                <div className="bubble assistant thinking">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
+            </article>
+          )}
+          <div ref={endRef} />
+        </main>
+
+        <form className="composer-shell" onSubmit={sendMessage}>
+          <div className="composer">
+            <textarea
+              ref={textareaRef}
+              rows="1"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Message Gemini..."
+            />
+            <div className="composer-footer">
+              <span className="composer-hint">Enter to send, Shift+Enter for a new line</span>
+              <div className="actions">
+                <button type="button" className="secondary" onClick={checkStatus}>
+                  Refresh
+                </button>
+                <button type="submit" className="primary" disabled={loading || !input.trim()}>
+                  {loading ? 'Thinking...' : 'Send'}
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-      </main>
+        </form>
+      </section>
     </div>
   )
 }

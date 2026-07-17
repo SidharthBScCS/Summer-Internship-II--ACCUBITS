@@ -21,11 +21,14 @@
 html,
 body,
 #root {
+  height: 100%;
   min-height: 100%;
 }
 
 body {
   margin: 0;
+  min-height: 100vh;
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(47, 109, 246, 0.28), transparent 30%),
     radial-gradient(circle at bottom right, rgba(84, 190, 255, 0.18), transparent 26%),
@@ -44,9 +47,11 @@ button {
 
 .app-shell {
   position: relative;
-  min-height: 100vh;
-  padding: 28px;
+  height: 100vh;
+  padding: 0;
   overflow: hidden;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
 }
 
 .ambient {
@@ -73,19 +78,117 @@ button {
   background: rgba(70, 211, 255, 0.2);
 }
 
+.history-panel {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px 16px;
+  background: rgba(7, 13, 25, 0.88);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(18px);
+  min-height: 100vh;
+}
+
+.history-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.history-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.history-new-button,
+.history-delete {
+  border: 0;
+  cursor: pointer;
+}
+
+.history-new-button {
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.history-list {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.history-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid transparent;
+}
+
+.history-item.active {
+  background: rgba(100, 141, 255, 0.14);
+  border-color: rgba(175, 199, 255, 0.14);
+}
+
+.history-select {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-select strong,
+.history-select span {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.history-select strong {
+  font-size: 0.95rem;
+}
+
+.history-select span {
+  margin-top: 4px;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+}
+
+.history-delete {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-soft);
+}
+
 .chat-card {
   position: relative;
   z-index: 1;
-  max-width: 1040px;
-  min-height: calc(100vh - 56px);
-  margin: 0 auto;
+  width: 100%;
+  height: 100vh;
+  margin: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 28px;
+  border: 0;
+  border-radius: 0;
   backdrop-filter: blur(22px);
-  box-shadow: var(--shadow);
+  box-shadow: none;
   overflow: hidden;
 }
 
@@ -170,7 +273,7 @@ button {
 .thread {
   min-height: 0;
   overflow: auto;
-  padding: 28px;
+  padding: 28px 32px;
 }
 
 .empty-state {
@@ -272,11 +375,12 @@ button {
 }
 
 .composer-shell {
-  padding: 22px 28px 28px;
+  padding: 18px 32px 24px;
   background: linear-gradient(180deg, rgba(10, 17, 33, 0), rgba(10, 17, 33, 0.85) 34%);
 }
 
 .composer {
+  max-width: 100%;
   padding: 18px;
   border-radius: 24px;
   background: var(--panel-strong);
@@ -367,12 +471,21 @@ button {
 
 @media (max-width: 840px) {
   .app-shell {
-    padding: 14px;
+    height: 100vh;
+    padding: 0;
+    grid-template-columns: 1fr;
   }
 
   .chat-card {
-    min-height: calc(100vh - 28px);
-    border-radius: 22px;
+    height: 100vh;
+    border-radius: 0;
+  }
+
+  .history-panel {
+    min-height: auto;
+    max-height: 220px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
 
   .topbar,
@@ -409,6 +522,21 @@ button {
 }
 
 @media (max-width: 560px) {
+  body {
+    overflow: hidden;
+  }
+
+  .history-panel {
+    padding: 14px;
+  }
+
+  .topbar,
+  .thread,
+  .composer-shell {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
   .brand h1 {
     font-size: 1.35rem;
   }

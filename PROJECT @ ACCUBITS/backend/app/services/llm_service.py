@@ -38,6 +38,37 @@ class LLMService:
             )
 
         contents = self._build_contents(question, history, context_chunks)
+        payload = self._build_rich_payload(question, contents)
+
+        data = self._post_to_gemini(
+            model=settings.gemini_model,
+            action="generateContent",
+            payload=payload,
+        )
+        text = self._extract_text(data)
+        if text:
+            return text
+
+        error_message = self._extract_error(data)
+        if error_message:
+            return f"Gemini error: {error_message}"
+
+        fallback_data = self._post_to_gemini(
+            model=settings.gemini_model,
+            action="generateContent",
+            payload=self._build_basic_payload(question, history),
+        )
+        fallback_text = self._extract_text(fallback_data)
+        if fallback_text:
+            return fallback_text
+
+        fallback_error = self._extract_error(fallback_data)
+        if fallback_error:
+            return f"Gemini error: {fallback_error}"
+
+        return "Gemini did not return a response. Check your API key, billing, model access, and internet access on the backend machine."
+
+    def _build_rich_payload(self, question: str, contents: list[dict]) -> dict:
         payload = {
             "system_instruction": {
                 "parts": [
@@ -57,20 +88,33 @@ class LLMService:
         if self._should_use_search(question):
             payload["tools"] = [{"google_search": {}}]
 
-        data = self._post_to_gemini(
-            model=settings.gemini_model,
-            action="generateContent",
-            payload=payload,
+        return payload
+
+    def _build_basic_payload(self, question: str, history: list[dict]) -> dict:
+        basic_contents: list[dict] = []
+
+        trimmed_history = (
+            history[:-1]
+            if history and history[-1].get("role") == "user" and history[-1].get("content", "").strip() == question.strip()
+            else history
         )
-        text = self._extract_text(data)
-        if text:
-            return text
 
-        error_message = self._extract_error(data)
-        if error_message:
-            return f"Gemini error: {error_message}"
+        for message in trimmed_history[-6:]:
+            role = "model" if message.get("role") == "assistant" else "user"
+            text = message.get("content", "").strip()
+            if text:
+                basic_contents.append({"role": role, "parts": [{"text": text}]})
 
-        return "Gemini did not return a response. Check your API key, billing, model access, and internet access on the backend machine."
+        basic_contents.append({"role": "user", "parts": [{"text": question}]})
+
+        return {
+            "contents": basic_contents,
+            "generationConfig": {
+                "temperature": 0.7,
+                "topP": 0.9,
+                "maxOutputTokens": 2048,
+            },
+        }
 
     def _system_prompt(self) -> str:
         today = datetime.now().strftime("%A, %B %d, %Y")

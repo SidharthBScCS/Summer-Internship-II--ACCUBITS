@@ -1,19 +1,71 @@
 import { useEffect, useRef, useState } from 'react'
 
 const API_BASE = 'http://localhost:8000/api'
+const CHATS_STORAGE_KEY = 'gemini-workspace-chats'
+const ACTIVE_CHAT_STORAGE_KEY = 'gemini-workspace-active-chat'
+
+function createChat() {
+  return {
+    id: crypto.randomUUID(),
+    title: 'New chat',
+    createdAt: new Date().toISOString(),
+    messages: []
+  }
+}
+
+function formatDate(value) {
+  return new Intl.DateTimeFormat('en', {
+    month: 'short',
+    day: 'numeric'
+  }).format(new Date(value))
+}
 
 function App() {
-  const [messages, setMessages] = useState([])
+  const [chats, setChats] = useState(() => {
+    const saved = window.localStorage.getItem(CHATS_STORAGE_KEY)
+    if (!saved) {
+      return [createChat()]
+    }
+
+    try {
+      const parsed = JSON.parse(saved)
+      return parsed.length > 0 ? parsed : [createChat()]
+    } catch (error) {
+      console.error('Could not restore chats', error)
+      return [createChat()]
+    }
+  })
+  const [activeChatId, setActiveChatId] = useState(
+    () => window.localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY) ?? null
+  )
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState('Checking backend...')
   const [connected, setConnected] = useState(false)
   const endRef = useRef(null)
   const textareaRef = useRef(null)
+  const activeChat = chats.find((chat) => chat.id === activeChatId) ?? chats[0]
+  const messages = activeChat?.messages ?? []
 
   useEffect(() => {
     checkStatus()
   }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem(CHATS_STORAGE_KEY, JSON.stringify(chats))
+  }, [chats])
+
+  useEffect(() => {
+    if (activeChatId) {
+      window.localStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, activeChatId)
+    }
+  }, [activeChatId])
+
+  useEffect(() => {
+    if (chats.length > 0 && !chats.some((chat) => chat.id === activeChatId)) {
+      setActiveChatId(chats[0].id)
+    }
+  }, [activeChatId, chats])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -28,6 +80,24 @@ function App() {
     textarea.style.height = '0px'
     textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`
   }, [input])
+
+  function updateChat(chatId, updater) {
+    setChats((current) => current.map((chat) => (chat.id === chatId ? updater(chat) : chat)))
+  }
+
+  function handleNewChat() {
+    const newChat = createChat()
+    setChats((current) => [newChat, ...current])
+    setActiveChatId(newChat.id)
+    setInput('')
+  }
+
+  function handleDeleteChat(chatId) {
+    setChats((current) => {
+      const remaining = current.filter((chat) => chat.id !== chatId)
+      return remaining.length > 0 ? remaining : [createChat()]
+    })
+  }
 
   async function checkStatus() {
     try {
@@ -49,12 +119,16 @@ function App() {
   async function sendMessage(event) {
     event.preventDefault()
     const message = input.trim()
-    if (!message || loading) {
+    if (!message || loading || !activeChat) {
       return
     }
 
     const nextMessages = [...messages, { role: 'user', content: message }]
-    setMessages(nextMessages)
+    updateChat(activeChat.id, (chat) => ({
+      ...chat,
+      title: chat.title === 'New chat' ? message.slice(0, 28) || 'New chat' : chat.title,
+      messages: nextMessages
+    }))
     setInput('')
     setLoading(true)
 
@@ -76,18 +150,24 @@ function App() {
       }
 
       const data = await response.json()
-      setMessages((current) => [...current, { role: 'assistant', content: data.answer }])
+      updateChat(activeChat.id, (chat) => ({
+        ...chat,
+        messages: [...chat.messages, { role: 'assistant', content: data.answer }]
+      }))
       setConnected(true)
       setStatus(`Backend connected • ${data.mode}`)
     } catch (error) {
       console.error('Chat failed', error)
-      setMessages((current) => [
-        ...current,
-        {
-          role: 'assistant',
-          content: 'I could not reach Gemini through the backend. Check the backend, API key, and internet connection.'
-        }
-      ])
+      updateChat(activeChat.id, (chat) => ({
+        ...chat,
+        messages: [
+          ...chat.messages,
+          {
+            role: 'assistant',
+            content: 'I could not reach Gemini through the backend. Check the backend, API key, and internet connection.'
+          }
+        ]
+      }))
       setConnected(false)
       setStatus('Backend not connected')
     } finally {
@@ -107,6 +187,45 @@ function App() {
       <div className="ambient ambient-one" />
       <div className="ambient ambient-two" />
 
+      <aside className="history-panel">
+        <div className="history-header">
+          <div>
+            <p className="eyebrow">History</p>
+            <h2>Conversations</h2>
+          </div>
+          <button type="button" className="history-new-button" onClick={handleNewChat}>
+            New
+          </button>
+        </div>
+
+        <div className="history-list">
+          {chats.map((chat) => (
+            <div key={chat.id} className={`history-item ${chat.id === activeChat?.id ? 'active' : ''}`}>
+              <button
+                type="button"
+                className="history-select"
+                onClick={() => {
+                  setActiveChatId(chat.id)
+                }}
+              >
+                <strong>{chat.title}</strong>
+                <span>{formatDate(chat.createdAt)}</span>
+              </button>
+              <button
+                type="button"
+                className="history-delete"
+                aria-label={`Delete ${chat.title}`}
+                onClick={() => {
+                  handleDeleteChat(chat.id)
+                }}
+              >
+                x
+              </button>
+            </div>
+          ))}
+        </div>
+      </aside>
+
       <section className="chat-card">
         <header className="topbar">
           <div className="brand">
@@ -115,7 +234,7 @@ function App() {
             </div>
             <div>
               <p className="eyebrow">Gemini Workspace</p>
-              <h1>Ask anything</h1>
+              <h1>{activeChat?.title ?? 'Ask anything'}</h1>
             </div>
           </div>
 
@@ -135,8 +254,8 @@ function App() {
               <p className="eyebrow">Ready</p>
               <h2>Start a conversation with Gemini</h2>
               <p>
-                Your backend is connected to the chat interface here. Ask a general question, a technical question,
-                or something current and the assistant will respond in this thread.
+                Your chats now save locally in the sidebar. Ask a general question, a technical question, or something
+                current and the assistant will respond in this thread.
               </p>
             </section>
           )}
